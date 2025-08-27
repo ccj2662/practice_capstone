@@ -1,0 +1,106 @@
+---
+title: "Able Case"
+author: "Joel Jorgensen"
+date: "2025-08-24"
+output: 
+  html_document:
+    number_sections: no
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Setup
+```{r library and file download, message=FALSE, warning=FALSE}
+library(tidyverse)
+
+url1 <- "https://raw.githubusercontent.com/jefftwebb/data/main/toy_sales_data.csv"
+toysales_df <- read.csv(url1)
+url2 <- "https://raw.githubusercontent.com/jefftwebb/data/main/toy_sales_PO.csv"
+po_df <- read.csv(url2)
+
+```
+
+
+# 1 
+The true ATE of the sale is 45.9.
+```{r q1}
+po_df |> mutate(outcome = y1 - y0) -> po_df
+round(mean(po_df$outcome),2)
+```
+
+# 2
+The estimated ATE of the sale is 77.96 or about 78 products sold.  
+```{r q2}
+toysales_df |> filter(is_on_sale == 1) |> pull(weekly_amount_sold) |> mean() -> sale_y
+toysales_df |> filter(is_on_sale == 0) |> pull(weekly_amount_sold) |> mean() -> sale_n
+
+estimated_ate <- round(sale_y - sale_n,2)
+estimated_ate
+```
+# 3
+Their can be other confounding factors driving higher weekly amount sold for the stores that are having sales, such as them having different average amount of products sold over the year. Also their could be selection bias as we don't know how it was determined what stores were picked for sales vs which did not run sales on a given week, we would want it to be totally random to determine if a sale is run or not.   
+
+# 4
+If we look at the average of the average products sold variable we can see that their is a difference in the average products sold, favoring the stores having sales (21.58 vs 18.78). Based on this their is confounding so these variable can't be used interchangeably, instead this variable would need to be controlled for.  
+
+```{r q4}
+toysales_df |> filter(is_on_sale == 1) |> pull(avg_week_sales) |> mean() |> round(2)-> avg_y
+toysales_df |> filter(is_on_sale == 0) |> pull(avg_week_sales) |> mean() |> round(2)-> avg_n
+
+status <- c("Treatment_Sale_Yes", "Treatment_Sale_No")
+mean_sales <- c(avg_y, avg_n)
+
+data.frame("Status" = status, "Mean Sales" = mean_sales)
+```
+# 5
+The adjusted ATE is 69 products sold compared to an unadjusted ATE of 78. The linear model controls or put another way looks at the avg_weekly_sales variable in addition to if the store is having a sale and uses both variables to determine what the effect is on the weekly amount sold. The ATE in this case is the coefficient output is_on_sale from linear model. 
+```{r q5}
+lm <- lm( weekly_amount_sold ~ is_on_sale + avg_week_sales, data = toysales_df)
+summary(lm)
+```
+
+# 6
+We can see that if we look at the average treatment effect by the week that once we reach 0 weeks until Xmas the effect sales have on units sold is still present but drops more compared to 1, 2 or 3 weeks until Xmas, those three weeks til Xmas are more consistent on their average treatment effect. This could indicate that more of the last minute shoppers are not as price sensitive in regards to sales given the short amount of time left they have to make a purchase. 
+```{r q6}
+po_df |> filter( weeks_to_xmas == 0) |> pull(outcome) |> mean() |> round(2)-> zero_x
+po_df |> filter( weeks_to_xmas == 1) |> pull(outcome) |> mean() |> round(2)-> one_x
+po_df |> filter( weeks_to_xmas == 2) |> pull(outcome) |> mean() |> round(2)-> two_x
+po_df |> filter( weeks_to_xmas == 3) |> pull(outcome) |> mean() |> round(2)-> three_x
+
+print(paste("0 weeks to Xmas CATE is ", zero_x))
+print(paste("1 weeks to Xmas CATE is ", one_x))
+print(paste("2 weeks to Xmas CATE is ", two_x))
+print(paste("3 weeks to Xmas CATE is ", three_x))
+```
+
+
+
+# 7 
+When we look at estimated CATE vs the actual we can see that the estimate overstates the effect of having a sale. The same general trend still shows that treatment effect of sales decreases as you get closer to Xmas but the total magnitude of effect is larger then the actual numbers. 
+```{r q7, message=FALSE, warning=FALSE}
+#Trained LM with interaction
+lmi <- lm( weekly_amount_sold ~ is_on_sale * weeks_to_xmas + avg_week_sales, data = toysales_df)
+summary(lmi)
+#Create df to use for predictions
+toysales_df |> group_by(is_on_sale, weeks_to_xmas) |> summarize(avg_week_sales = mean(avg_week_sales)) -> grouped_df
+predicted <- predict(lmi, newdata = grouped_df)
+#Add predictions to df
+data.frame(grouped_df, predicted) -> new_df
+#Split df and then merge so in line for calculation, take difference and filter result
+sale_df <- filter(new_df, is_on_sale == 1)
+no_sale_df <- filter(new_df, is_on_sale == 0)
+final_df <- data.frame(sale_df, no_sale_df)
+final_df <- final_df |> mutate(CATE = round(predicted - predicted.1,2))
+final_df |> select(weeks_to_xmas,CATE)
+```
+
+
+
+
+
+
